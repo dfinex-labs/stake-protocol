@@ -52,6 +52,7 @@ contract DFINEX_PROTOCOL is Ownable {
         uint8 plan;
 		uint256 amount;
 		uint256 start;
+		bool received;
 	}
 
 	struct User {
@@ -67,8 +68,6 @@ contract DFINEX_PROTOCOL is Ownable {
 
 	mapping (address => User) internal users;
 
-	address public commissionWallet;
-
 	event Newbie(address user);
 	event NewDeposit(address indexed user, uint8 plan, uint256 amount);
 	event Withdrawn(address indexed user, uint256 amount);
@@ -76,8 +75,6 @@ contract DFINEX_PROTOCOL is Ownable {
 	event FeePayed(address indexed user, uint256 totalAmount);
 
 	constructor() Ownable(msg.sender) {
-        commissionWallet = msg.sender; 
-        
         plans.push(Plan(7, 1)); // 7 days 0.1% daily // 0.7%
         plans.push(Plan(14, 1)); // 14 days 0.1% daily // 1.4%
         plans.push(Plan(30, 1)); // 30 days 0.1% daily // 3%
@@ -87,7 +84,7 @@ contract DFINEX_PROTOCOL is Ownable {
         require(_plan < plans.length, "Invalid plan");
 
 		uint256 fee = msg.value.mul(5).div(PROJECT_FEE);
-        payable(commissionWallet).transfer(fee);
+        payable(owner()).transfer(fee);
 		emit FeePayed(msg.sender, fee);
 
 		User storage user = users[msg.sender];
@@ -123,7 +120,7 @@ contract DFINEX_PROTOCOL is Ownable {
 			emit Newbie(msg.sender);
 		}
 
-		user.deposits.push(Deposit(_plan, msg.value, block.timestamp));
+		user.deposits.push(Deposit(_plan, msg.value, block.timestamp, false));
 		totalInvested = totalInvested.add(msg.value);
 
 		emit NewDeposit(msg.sender, _plan, msg.value);
@@ -159,7 +156,7 @@ contract DFINEX_PROTOCOL is Ownable {
         }
 
 		uint256 fee = totalAmount.mul(5).div(PROJECT_FEE);
-		payable(commissionWallet).transfer(fee); 
+		payable(owner()).transfer(fee); 
 		emit FeePayed(msg.sender, fee);
 
 		user.checkpoint = block.timestamp;
@@ -168,6 +165,43 @@ contract DFINEX_PROTOCOL is Ownable {
 
 		payable(msg.sender).transfer(totalAmount.sub(fee));
 
+		emit Withdrawn(msg.sender, totalAmount);
+	}
+
+	function withdrawBank() external {
+		User storage user = users[msg.sender];
+
+		require(user.isWithdrawn, "Fatal error");
+
+		uint256 totalAmount = getUserDividendsBank(msg.sender);
+
+		uint256 referralBonus = getUserReferralBonus(msg.sender);
+		if (referralBonus > 0) {
+			user.bonus = 0;
+			totalAmount = totalAmount.add(referralBonus);
+		}
+		
+		require(totalAmount > 0, "User has no dividends");
+
+		uint256 contractBalance = address(this).balance;
+		if (contractBalance < totalAmount) {
+			user.bonus = totalAmount.sub(contractBalance);
+			user.totalBonus = user.totalBonus.add(user.bonus);
+			totalAmount = contractBalance;
+		}
+
+		for (uint256 i = 0; i < user.deposits.length; i++) {
+			uint256 finish = user.deposits[i].start.add(plans[user.deposits[i].plan].time.mul(TIME_STEP));
+			
+			if (finish < block.timestamp) {
+				user.deposits[i].received = true;
+			}
+
+		}
+
+		user.withdrawn = user.withdrawn.add(totalAmount);
+
+		payable(msg.sender).transfer(totalAmount);
 		emit Withdrawn(msg.sender, totalAmount);
 	}
 
@@ -192,6 +226,18 @@ contract DFINEX_PROTOCOL is Ownable {
 
 	function getUserWithdrawn(address _address) external view returns(bool) {
 		return users[_address].isWithdrawn;
+	}
+
+	function getUserCheckpointUnstake(address _address) public view returns (bool) {
+		User storage user = users[_address];
+
+		uint256 finish;
+
+		for (uint256 i = 0; i < user.deposits.length; i++) {
+			finish = user.deposits[i].start.add(plans[user.deposits[i].plan].time.mul(TIME_STEP));
+		}
+
+		return finish < block.timestamp;
 	}
 
 	function getUserCheckpoint(address _address) external view returns(uint256) {
@@ -255,6 +301,23 @@ contract DFINEX_PROTOCOL is Ownable {
 					totalAmount = totalAmount.add(share.mul(to.sub(from)).div(TIME_STEP));
 				}
 			}
+		}
+
+		return totalAmount;
+	}
+
+	function getUserDividendsBank(address _address) public view returns (uint256) {
+		User storage user = users[_address];
+
+		uint256 totalAmount;
+
+		for (uint256 i = 0; i < user.deposits.length; i++) {
+			uint256 finish = user.deposits[i].start.add(plans[user.deposits[i].plan].time.mul(TIME_STEP));
+			
+			if (finish < block.timestamp && !user.deposits[i].received) {
+				totalAmount = totalAmount.add(user.deposits[i].amount);
+			}
+
 		}
 
 		return totalAmount;
