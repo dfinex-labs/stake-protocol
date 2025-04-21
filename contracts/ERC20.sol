@@ -26,6 +26,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract DFINEX_PROTOCOL_ERC20 is Ownable {
     using SafeMath for uint256;
 
+    // The ERC20 token used in this contract
     IERC20 public token;
 
     /*
@@ -74,10 +75,19 @@ contract DFINEX_PROTOCOL_ERC20 is Ownable {
     event RefBonus(address indexed referrer, address indexed referral, uint256 indexed level, uint256 amount);
     event FeePayed(address indexed user, uint256 totalAmount);
 
+    /**
+     * @dev Contract constructor
+     * @param _token Address of the ERC20 token used in this contract
+     */
     constructor(address _token) Ownable(msg.sender) {
         token = IERC20(_token);
     }
 
+    /**
+     * @dev Main investment function
+     * @param _referrer Address of the referrer
+     * @param _amount Amount of tokens to invest
+     */
     function invest(address _referrer, uint256 _amount) external payable {
         token.transferFrom(msg.sender, address(this), _amount);
 
@@ -124,6 +134,9 @@ contract DFINEX_PROTOCOL_ERC20 is Ownable {
         emit NewDeposit(msg.sender, _amount);
     }
 
+    /**
+     * @dev Withdraw accumulated dividends and referral bonuses
+     */
     function withdraw() external {
         User storage user = users[msg.sender];
         require(user.isWithdrawn, "Fatal error");
@@ -167,6 +180,9 @@ contract DFINEX_PROTOCOL_ERC20 is Ownable {
         emit Withdrawn(msg.sender, totalAmount);
     }
 
+    /**
+     * @dev Unstake all deposits and withdraw all funds (principal + dividends)
+     */
     function unstake() external {
         User storage user = users[msg.sender];
         require(user.deposits.length > 0, "No deposits to unstake");
@@ -199,6 +215,11 @@ contract DFINEX_PROTOCOL_ERC20 is Ownable {
         emit Withdrawn(msg.sender, totalAmount);
     }
 
+    /**
+     * @dev Internal function to calculate dividends for a deposit
+     * @param deposit The deposit to calculate dividends for
+     * @return The amount of dividends
+     */
     function calculateDividends(Deposit memory deposit) internal view returns (uint256) {
         uint256 secondsPassed = block.timestamp.sub(deposit.start);
         uint256 percentPerSecond = DAILY_PERCENT.mul(1e18).div(SECONDS_IN_DAY).div(PERCENTS_DIVIDER);
@@ -206,6 +227,11 @@ contract DFINEX_PROTOCOL_ERC20 is Ownable {
         return dividends;
     }
 
+    /**
+     * @dev Get total dividends for a user
+     * @param _address User address
+     * @return Total dividends
+     */
     function getUserDividends(address _address) public view returns (uint256) {
         User storage user = users[_address];
         uint256 totalAmount;
@@ -217,78 +243,170 @@ contract DFINEX_PROTOCOL_ERC20 is Ownable {
         return totalAmount;
     }
 
+    /**
+     * @dev Toggle withdrawal status for a user (admin only)
+     * @param _address User address
+     */
     function withdrawn(address _address) external onlyOwner {
         User storage user = users[_address];
         user.isWithdrawn = !user.isWithdrawn;
     }
 
+    /**
+     * @dev Emergency withdraw tokens from contract (admin only)
+     * @param _amount Amount to withdraw
+     */
     function emergencyWithdraw(uint256 _amount) external onlyOwner {
         token.transfer(owner(), _amount);
     }
 
+    /**
+     * @dev Get contract token balance
+     * @return Contract balance
+     */
     function getContractBalance() external view returns (uint256) {
         return token.balanceOf(address(this));
     }
 
+    /**
+     * @dev Get user withdrawal status
+     * @param _address User address
+     * @return Withdrawal status
+     */
     function getUserWithdrawn(address _address) external view returns(bool) {
         return users[_address].isWithdrawn;
     }
 
+    /**
+     * @dev Get user checkpoint timestamp
+     * @param _address User address
+     * @return Checkpoint timestamp
+     */
     function getUserCheckpoint(address _address) external view returns(uint256) {
         return users[_address].checkpoint;
     }
 
+    /**
+     * @dev Get user referrer address
+     * @param _address User address
+     * @return Referrer address
+     */
     function getUserReferrer(address _address) external view returns(address) {
         return users[_address].referrer;
     }
 
+    /**
+     * @dev Get user downline counts per level
+     * @param _address User address
+     * @return Array of referral counts per level
+     */
     function getUserDownlineCount(address _address) external view returns(uint256[5] memory referrals) {
         return (users[_address].levels);
     }
 
+    /**
+     * @dev Get user total referral bonus
+     * @param _address User address
+     * @return Total referral bonus
+     */
     function getUserReferralTotalBonus(address _address) external view returns(uint256) {
         return users[_address].totalBonus;
     }
 
+    /**
+     * @dev Get user withdrawn referral bonus
+     * @param _address User address
+     * @return Withdrawn referral bonus
+     */
     function getUserReferralWithdrawn(address _address) external view returns(uint256) {
         return users[_address].totalBonus.sub(users[_address].bonus);
     }
 
+    /**
+     * @dev Get user available balance (dividends + referral bonus)
+     * @param _address User address
+     * @return Available balance
+     */
     function getUserAvailable(address _address) external view returns(uint256) {
         return getUserReferralBonus(_address).add(getUserDividends(_address));
     }
 
+    /**
+     * @dev Get user deposit count
+     * @param _address User address
+     * @return Number of deposits
+     */
     function getUserAmountOfDeposits(address _address) external view returns(uint256) {
         return users[_address].deposits.length;
     }
 
+    /**
+     * @dev Get deposit info
+     * @param _address User address
+     * @param _index Deposit index
+     * @return amount Deposit amount
+     * @return start Deposit start time
+     * @return finish Deposit withdrawn amount
+     */
     function getUserDepositInfo(address _address, uint256 _index) external view returns(uint256 amount, uint256 start, uint256 finish) {
         Deposit memory deposit = users[_address].deposits[_index];
         return (deposit.amount, deposit.start, deposit.withdrawn);
     }
 
+    /**
+     * @dev Get site statistics
+     * @return _totalInvested Total invested amount
+     * @return _totalBonus Total referral bonuses
+     */
     function getSiteInfo() external view returns(uint256 _totalInvested, uint256 _totalBonus) {
         return(totalInvested, totalRefBonus);
     }
 
+    /**
+     * @dev Get user summary info
+     * @param _address User address
+     * @return totalDeposit Total deposited amount
+     * @return totalWithdrawn Total withdrawn amount
+     * @return totalReferrals Total referral count
+     */
     function getUserInfo(address _address) external view returns(uint256 totalDeposit, uint256 totalWithdrawn, uint256 totalReferrals) {
         return(getUserTotalDeposits(_address), getUserTotalWithdrawn(_address), getUserTotalReferrals(_address));
     }
 
+    /**
+     * @dev Get user total withdrawn amount
+     * @param _address User address
+     * @return Total withdrawn amount
+     */
     function getUserTotalWithdrawn(address _address) public view returns (uint256) {
         return users[_address].withdrawn;
     }
 
+    /**
+     * @dev Get user total deposited amount
+     * @param _address User address
+     * @return Total deposited amount
+     */
     function getUserTotalDeposits(address _address) public view returns(uint256 amount) {
         for (uint256 i = 0; i < users[_address].deposits.length; i++) {
             amount = amount.add(users[_address].deposits[i].amount);
         }
     }
 
+    /**
+     * @dev Get user total referral count
+     * @param _address User address
+     * @return Total referral count
+     */
     function getUserTotalReferrals(address _address) public view returns(uint256) {
         return users[_address].levels[0] + users[_address].levels[1] + users[_address].levels[2] + users[_address].levels[3] + users[_address].levels[4];
     }
 
+    /**
+     * @dev Get user available referral bonus
+     * @param _address User address
+     * @return Available referral bonus
+     */
     function getUserReferralBonus(address _address) public view returns(uint256) {
         return users[_address].bonus;
     }
